@@ -2,48 +2,108 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sandtris</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Sandtris Flow</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <main class="app">
-    <section class="panel">
-      <p class="eyebrow">Прототип</p>
-      <h1>Sandtris</h1>
+    <section class="panel intro">
+      <p class="eyebrow">Anti-stress Sand Tetris</p>
+      <h1>Sandtris Flow</h1>
       <p class="lead">
-        Фигуры складываются как в тетрисе, а потом распадаются на песок и сами
-        выравнивают поверхность. Проиграть нельзя, можно только медитативно
-        лепить рельеф.
+        Это тетрис без поражения: фигуры падают, превращаются в цветной песок,
+        слои медленно текут вниз, а хаос все равно становится красивым.
       </p>
 
+      <div class="intro-card">
+        <p class="intro-title">Небольшое правило этой вселенной</p>
+        <p>
+          Здесь невозможно проиграть. Ты просто перекладываешь форму в поток,
+          а поток превращает ее в мягкий узор и шуточные биткоины.
+        </p>
+      </div>
+
       <div class="stats">
-        <div class="stat">
-          <span class="label">Фигур</span>
-          <strong id="piecesPlaced">0</strong>
-        </div>
-        <div class="stat">
-          <span class="label">Песка</span>
-          <strong id="sandCells">0</strong>
-        </div>
-        <div class="stat">
-          <span class="label">Рельеф</span>
-          <strong id="surfaceLevel">0</strong>
+        <article class="stat">
+          <span class="label">Биткоины</span>
+          <strong id="bitcoinCount">0</strong>
+          <small>несерьезное богатство</small>
+        </article>
+        <article class="stat">
+          <span class="label">Сессия</span>
+          <strong id="sessionTime">00:00</strong>
+          <small>время в потоке</small>
+        </article>
+        <article class="stat">
+          <span class="label">Всего сыграно</span>
+          <strong id="totalTime">00:00</strong>
+          <small>сохраняется локально</small>
+        </article>
+      </div>
+
+      <div class="toolbar">
+        <button id="startPauseButton" class="primary">Старт</button>
+        <button id="resetButton" class="secondary">Перезапуск</button>
+      </div>
+
+      <div class="toolbar">
+        <button id="musicToggleButton" class="secondary">Музыка: выкл</button>
+        <label class="theme-picker">
+          <span>Тема</span>
+          <select id="themeSelect">
+            <option value="lofi">lo-fi</option>
+            <option value="piano">рояль</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="breath-card">
+        <div id="breathOrb" class="breath-orb" aria-hidden="true"></div>
+        <div>
+          <p class="intro-title">Дыхательный ритм</p>
+          <p id="breathText" class="breath-text">вдох</p>
         </div>
       </div>
 
-      <div class="controls">
-        <span>`←` `→` двигать</span>
-        <span>`↑` вращать</span>
-        <span>`↓` ускорить падение</span>
-        <span>`Пробел` сбросить фигуру</span>
+      <div class="help-grid">
+        <span><kbd>←</kbd> <kbd>→</kbd> или <kbd>A</kbd> <kbd>D</kbd> двигать</span>
+        <span><kbd>↑</kbd> или <kbd>W</kbd> вращать</span>
+        <span><kbd>↓</kbd> или <kbd>S</kbd> мягко ускорять</span>
+        <span>На телефоне используй кнопки снизу одной рукой</span>
       </div>
-
-      <button id="resetButton" class="reset">Перезапустить</button>
     </section>
 
-    <section class="board-shell">
-      <canvas id="game" width="420" height="720" aria-label="Игровое поле"></canvas>
+    <section class="board-panel">
+      <div class="canvas-head">
+        <div>
+          <p class="mini-label">Статус</p>
+          <strong id="statusText">Пауза</strong>
+        </div>
+        <div>
+          <p class="mini-label">Песочный поток</p>
+          <strong id="flowText">спокойный</strong>
+        </div>
+      </div>
+
+      <div class="board-shell">
+        <canvas id="game" width="360" height="720" aria-label="Игровое поле"></canvas>
+        <div id="overlay" class="overlay">
+          <p class="overlay-eyebrow">Мягкий старт</p>
+          <h2>Невозможно проиграть</h2>
+          <p>
+            Нажми старт или любую кнопку управления. Музыка включится только
+            после твоего первого действия.
+          </p>
+        </div>
+      </div>
+
+      <div class="mobile-controls" aria-label="Экранные кнопки управления">
+        <button data-action="left">←</button>
+        <button data-action="rotate">⟳</button>
+        <button data-action="right">→</button>
+        <button data-action="down">↓</button>
+      </div>
     </section>
   </main>
 
