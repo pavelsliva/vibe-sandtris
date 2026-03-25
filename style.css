@@ -35,7 +35,7 @@ body {
 }
 
 button,
-select {
+input {
   font: inherit;
 }
 
@@ -105,8 +105,7 @@ h2 {
 .help-grid span,
 .board-shell,
 .mobile-controls button,
-.toolbar .secondary,
-.theme-picker {
+.toolbar .secondary {
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -136,8 +135,7 @@ h2 {
 }
 
 .label,
-.stat small,
-.theme-picker span {
+.stat small {
   display: block;
   color: var(--muted);
 }
@@ -154,8 +152,7 @@ h2 {
   margin-top: 0.85rem;
 }
 
-.toolbar button,
-.theme-picker {
+.toolbar button {
   min-height: 52px;
   border-radius: 999px;
 }
@@ -175,24 +172,6 @@ h2 {
 
 .secondary {
   background: var(--button);
-}
-
-.theme-picker {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: 1.15;
-  padding: 0.4rem 0.5rem 0.4rem 1rem;
-}
-
-.theme-picker select {
-  border: none;
-  outline: none;
-  min-width: 110px;
-  border-radius: 999px;
-  padding: 0.5rem 0.9rem;
-  color: var(--text);
-  background: rgba(0, 0, 0, 0.18);
 }
 
 .breath-card {
@@ -332,7 +311,6 @@ canvas {
     flex-wrap: wrap;
   }
 
-  .theme-picker,
   .toolbar button {
     flex: 1 1 100%;
   }

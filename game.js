@@ -5,7 +5,6 @@ const overlay = document.getElementById("overlay");
 const startPauseButton = document.getElementById("startPauseButton");
 const resetButton = document.getElementById("resetButton");
 const musicToggleButton = document.getElementById("musicToggleButton");
-const themeSelect = document.getElementById("themeSelect");
 const bitcoinCountNode = document.getElementById("bitcoinCount");
 const sessionTimeNode = document.getElementById("sessionTime");
 const totalTimeNode = document.getElementById("totalTime");
@@ -28,8 +27,12 @@ const SOLID_TO_SAND_MS = 700;
 const SAND_STEP_MS = 42;
 const DRAIN_STEP_MS = 90;
 const DRAIN_TRIGGER_ROW = 8;
+const FUNNEL_ROW = ROWS - 5;
+const FUNNEL_COLUMNS = [4, 5];
 const SAVE_INTERVAL_MS = 2000;
 const STORAGE_KEY = "sandtris-flow-total-ms";
+const TETRIS_LITE_NOTES = [76, 71, 72, 74, 72, 71, 69, 69, 72, 76, 74, 72, 71, 71, 72, 74, 76, 72, 69, 69];
+const TETRIS_LITE_DURATIONS = [0.26, 0.13, 0.13, 0.2, 0.13, 0.13, 0.2, 0.2, 0.2, 0.26, 0.13, 0.13, 0.26, 0.13, 0.13, 0.2, 0.2, 0.2, 0.28, 0.36];
 
 const PALETTE = [
   "#d98d6a",
@@ -69,23 +72,6 @@ const SHAPES = [
   ],
 ];
 
-const THEMES = {
-  lofi: {
-    notes: [57, 60, 64, 67, 64, 60, 55, 59, 62, 65, 62, 59],
-    duration: 0.78,
-    wave: "triangle",
-    gain: 0.042,
-    bassOffset: -12,
-  },
-  piano: {
-    notes: [60, 64, 67, 72, 67, 64, 62, 65, 69, 74, 69, 65],
-    duration: 0.92,
-    wave: "sine",
-    gain: 0.038,
-    bassOffset: -24,
-  },
-};
-
 let board = createBoard();
 let currentPiece = null;
 let dropAccumulator = 0;
@@ -98,16 +84,15 @@ let totalMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
 let bitcoins = 0;
 let isRunning = false;
 let hasStarted = false;
-let firstInteractionDone = false;
 let breathAccumulator = 0;
 let breathIndex = 0;
 let isBreathExpanded = false;
+const keysHeld = new Set();
 let audioContext = null;
 let masterGain = null;
 let musicEnabled = false;
 let nextNoteAt = 0;
 let noteIndex = 0;
-const keysHeld = new Set();
 
 function createCell() {
   return {
@@ -129,10 +114,6 @@ function cloneMatrix(matrix) {
 
 function rotateMatrix(matrix) {
   return matrix[0].map((_, column) => matrix.map((row) => row[column]).reverse());
-}
-
-function midiToFrequency(note) {
-  return 440 * (2 ** ((note - 69) / 12));
 }
 
 function roundRect(x, y, width, height, radius) {
@@ -286,6 +267,27 @@ function moveSand(fromX, fromY, toX, toY) {
   return true;
 }
 
+function distanceToFunnel(x) {
+  return Math.min(...FUNNEL_COLUMNS.map((column) => Math.abs(column - x)));
+}
+
+function tryFlowTowardsFunnel(x, y) {
+  const nearestColumn = FUNNEL_COLUMNS.reduce((best, column) =>
+    Math.abs(column - x) < Math.abs(best - x) ? column : best,
+  );
+  const direction = Math.sign(nearestColumn - x);
+
+  if (!direction) {
+    return false;
+  }
+
+  if (moveSand(x, y, x + direction, y)) {
+    return true;
+  }
+
+  return moveSand(x, y, x + direction, y + 1);
+}
+
 function settleSand(iterations = 1) {
   for (let step = 0; step < iterations; step += 1) {
     for (let y = ROWS - 2; y >= 0; y -= 1) {
@@ -303,11 +305,20 @@ function settleSand(iterations = 1) {
           continue;
         }
 
+        const closeToFunnel = y >= FUNNEL_ROW && shouldDrain();
+        if (closeToFunnel && tryFlowTowardsFunnel(x, y)) {
+          continue;
+        }
+
         const lateral = traverseRight ? [1, -1] : [-1, 1];
         for (const dir of lateral) {
           if (moveSand(x, y, x + dir, y + 1)) {
             break;
           }
+        }
+
+        if (closeToFunnel && distanceToFunnel(x) <= 2) {
+          tryFlowTowardsFunnel(x, y);
         }
       }
     }
@@ -336,25 +347,28 @@ function drainSand() {
     return;
   }
 
-  const apertureColumns = [4, 5, 3, 6];
   let removed = 0;
 
-  for (let y = ROWS - 1; y >= 0; y -= 1) {
-    for (const column of apertureColumns) {
-      const cell = board[y][column];
-      if (cell.state === SAND) {
-        board[y][column] = createCell();
-        removed += 1;
-      }
+  for (const column of FUNNEL_COLUMNS) {
+    const cell = board[ROWS - 1][column];
+    if (cell.state === SAND) {
+      board[ROWS - 1][column] = createCell();
+      removed += 1;
     }
+  }
 
-    if (removed > 0) {
-      break;
+  if (!removed) {
+    for (let y = ROWS - 2; y >= FUNNEL_ROW; y -= 1) {
+      for (const column of FUNNEL_COLUMNS) {
+        if (board[y][column].state === SAND && board[y + 1][column].state === EMPTY) {
+          moveSand(column, y, column, y + 1);
+        }
+      }
     }
   }
 
   if (removed > 0) {
-    bitcoins += removed;
+    bitcoins += removed * 2;
   }
 }
 
@@ -384,8 +398,17 @@ function drawBackground() {
   ctx.fillStyle = glow;
   ctx.fillRect(0, canvas.height - 140, canvas.width, 140);
 
-  ctx.fillStyle = "rgba(242, 207, 150, 0.18)";
-  roundRect(canvas.width / 2 - CELL * 1.1, canvas.height - 10, CELL * 2.2, 12, 6);
+  ctx.fillStyle = "rgba(242, 207, 150, 0.1)";
+  ctx.beginPath();
+  ctx.moveTo(canvas.width / 2 - CELL * 2.2, canvas.height - CELL * 4.3);
+  ctx.lineTo(canvas.width / 2 - CELL * 0.55, canvas.height - CELL * 0.3);
+  ctx.lineTo(canvas.width / 2 + CELL * 0.55, canvas.height - CELL * 0.3);
+  ctx.lineTo(canvas.width / 2 + CELL * 2.2, canvas.height - CELL * 4.3);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(242, 207, 150, 0.2)";
+  roundRect(canvas.width / 2 - CELL * 0.72, canvas.height - 10, CELL * 1.44, 12, 6);
   ctx.fill();
 }
 
@@ -407,19 +430,28 @@ function drawSand(x, y, color) {
   const px = x * CELL;
   const py = y * CELL;
   const grains = [
-    [0.12, 0.24, 0.22],
-    [0.44, 0.16, 0.18],
-    [0.26, 0.52, 0.2],
-    [0.58, 0.5, 0.18],
-    [0.44, 0.68, 0.14],
+    [0.12, 0.2, 0.18],
+    [0.24, 0.38, 0.15],
+    [0.41, 0.16, 0.14],
+    [0.56, 0.28, 0.15],
+    [0.69, 0.2, 0.13],
+    [0.18, 0.62, 0.14],
+    [0.38, 0.56, 0.16],
+    [0.54, 0.52, 0.13],
+    [0.72, 0.6, 0.15],
+    [0.48, 0.76, 0.12],
   ];
+  const shade = y / ROWS;
 
   for (const [gx, gy, size] of grains) {
-    ctx.fillStyle = color;
+    ctx.fillStyle = tintColor(color, 0.18 - shade * 0.22);
     ctx.beginPath();
     ctx.arc(px + CELL * gx, py + CELL * gy, CELL * size * 0.5, 0, Math.PI * 2);
     ctx.fill();
   }
+
+  ctx.fillStyle = tintColor(color, -0.18);
+  ctx.fillRect(px + CELL * 0.08, py + CELL * 0.84, CELL * 0.84, CELL * 0.08);
 }
 
 function drawBoard() {
@@ -496,6 +528,78 @@ function persistTime() {
   localStorage.setItem(STORAGE_KEY, String(totalMs + sessionMs));
 }
 
+function ensureAudio() {
+  if (audioContext) {
+    return;
+  }
+
+  audioContext = new window.AudioContext();
+  masterGain = audioContext.createGain();
+  masterGain.gain.value = 0;
+  masterGain.connect(audioContext.destination);
+}
+
+function midiToFrequency(note) {
+  return 440 * (2 ** ((note - 69) / 12));
+}
+
+function setMusicEnabled(enabled) {
+  musicEnabled = enabled;
+  musicToggleButton.textContent = enabled ? "Мелодия: вкл" : "Мелодия: выкл";
+
+  if (!masterGain || !audioContext) {
+    return;
+  }
+
+  const now = audioContext.currentTime;
+  masterGain.gain.cancelScheduledValues(now);
+  masterGain.gain.linearRampToValueAtTime(enabled ? 0.055 : 0, now + 0.4);
+}
+
+function scheduleMelodyNote(note, duration, startTime) {
+  const voice = audioContext.createOscillator();
+  const voiceGain = audioContext.createGain();
+  const bass = audioContext.createOscillator();
+  const bassGain = audioContext.createGain();
+
+  voice.type = "triangle";
+  voice.frequency.value = midiToFrequency(note);
+  voiceGain.gain.setValueAtTime(0, startTime);
+  voiceGain.gain.linearRampToValueAtTime(0.05, startTime + 0.03);
+  voiceGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+
+  bass.type = "sine";
+  bass.frequency.value = midiToFrequency(note - 24);
+  bassGain.gain.setValueAtTime(0, startTime);
+  bassGain.gain.linearRampToValueAtTime(0.022, startTime + 0.04);
+  bassGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration + 0.08);
+
+  voice.connect(voiceGain).connect(masterGain);
+  bass.connect(bassGain).connect(masterGain);
+
+  voice.start(startTime);
+  bass.start(startTime);
+  voice.stop(startTime + duration + 0.05);
+  bass.stop(startTime + duration + 0.12);
+}
+
+function tickMusicScheduler() {
+  if (!audioContext || !musicEnabled || !isRunning) {
+    return;
+  }
+
+  while (nextNoteAt < audioContext.currentTime + 0.25) {
+    const melodyIndex = noteIndex % TETRIS_LITE_NOTES.length;
+    scheduleMelodyNote(
+      TETRIS_LITE_NOTES[melodyIndex],
+      TETRIS_LITE_DURATIONS[melodyIndex],
+      nextNoteAt,
+    );
+    nextNoteAt += TETRIS_LITE_DURATIONS[melodyIndex];
+    noteIndex += 1;
+  }
+}
+
 function updateBreath(delta) {
   breathAccumulator += delta;
   const phases = ["вдох", "выдох", "пауза"];
@@ -508,76 +612,11 @@ function updateBreath(delta) {
   }
 }
 
-function ensureAudio() {
-  if (audioContext) {
-    return;
-  }
-
-  audioContext = new window.AudioContext();
-  masterGain = audioContext.createGain();
-  masterGain.gain.value = 0;
-  masterGain.connect(audioContext.destination);
-}
-
-function setMusicEnabled(enabled) {
-  musicEnabled = enabled;
-  musicToggleButton.textContent = enabled ? "Музыка: вкл" : "Музыка: выкл";
-
-  if (!audioContext || !masterGain) {
-    return;
-  }
-
-  const when = audioContext.currentTime;
-  masterGain.gain.cancelScheduledValues(when);
-  masterGain.gain.linearRampToValueAtTime(enabled ? 0.12 : 0, when + 0.35);
-}
-
-function scheduleNote(theme, note, startTime) {
-  const duration = theme.duration;
-
-  const mainOsc = audioContext.createOscillator();
-  const mainGain = audioContext.createGain();
-  mainOsc.type = theme.wave;
-  mainOsc.frequency.value = midiToFrequency(note);
-  mainGain.gain.setValueAtTime(0, startTime);
-  mainGain.gain.linearRampToValueAtTime(theme.gain, startTime + 0.03);
-  mainGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-  mainOsc.connect(mainGain).connect(masterGain);
-  mainOsc.start(startTime);
-  mainOsc.stop(startTime + duration + 0.04);
-
-  const bassOsc = audioContext.createOscillator();
-  const bassGain = audioContext.createGain();
-  bassOsc.type = "sine";
-  bassOsc.frequency.value = midiToFrequency(note + theme.bassOffset);
-  bassGain.gain.setValueAtTime(0, startTime);
-  bassGain.gain.linearRampToValueAtTime(theme.gain * 0.62, startTime + 0.05);
-  bassGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration + 0.15);
-  bassOsc.connect(bassGain).connect(masterGain);
-  bassOsc.start(startTime);
-  bassOsc.stop(startTime + duration + 0.18);
-}
-
-function tickMusicScheduler() {
-  if (!audioContext || !musicEnabled || !isRunning) {
-    return;
-  }
-
-  const theme = THEMES[themeSelect.value];
-  while (nextNoteAt < audioContext.currentTime + 0.25) {
-    scheduleNote(theme, theme.notes[noteIndex % theme.notes.length], nextNoteAt);
-    nextNoteAt += theme.duration;
-    noteIndex += 1;
-  }
-}
-
 function acknowledgeInteraction() {
-  if (firstInteractionDone) {
-    return;
-  }
-
-  firstInteractionDone = true;
   ensureAudio();
+  if (audioContext.state === "suspended") {
+    audioContext.resume();
+  }
 }
 
 function startGame() {
@@ -588,11 +627,7 @@ function startGame() {
     spawnPiece();
   }
 
-  if (audioContext && audioContext.state === "suspended") {
-    audioContext.resume();
-  }
-
-  if (musicEnabled) {
+  if (musicEnabled && audioContext) {
     nextNoteAt = audioContext.currentTime + 0.05;
   }
 
@@ -770,19 +805,10 @@ startPauseButton.addEventListener("click", toggleStartPause);
 resetButton.addEventListener("click", resetGame);
 musicToggleButton.addEventListener("click", () => {
   acknowledgeInteraction();
-  ensureAudio();
-  if (audioContext.state === "suspended") {
-    audioContext.resume();
-  }
   setMusicEnabled(!musicEnabled);
-  nextNoteAt = audioContext.currentTime + 0.05;
-});
-
-themeSelect.addEventListener("change", () => {
-  if (!audioContext) {
-    return;
+  if (musicEnabled) {
+    nextNoteAt = audioContext.currentTime + 0.05;
   }
-  nextNoteAt = audioContext.currentTime + 0.05;
 });
 
 document.addEventListener(
@@ -795,6 +821,17 @@ document.addEventListener(
 );
 
 window.addEventListener("beforeunload", persistTime);
+
+function tintColor(hex, amount) {
+  const normalized = hex.replace("#", "");
+  const channels = normalized.match(/.{1,2}/g).map((channel) => parseInt(channel, 16));
+  const adjusted = channels.map((channel) => {
+    const target = amount >= 0 ? 255 : 0;
+    const mix = Math.abs(amount);
+    return Math.round(channel + (target - channel) * mix);
+  });
+  return `rgb(${adjusted[0]}, ${adjusted[1]}, ${adjusted[2]})`;
+}
 
 resetGame();
 setMusicEnabled(false);
