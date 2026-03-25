@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sandtris</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <section class="panel">
+      <p class="eyebrow">Прототип</p>
+      <h1>Sandtris</h1>
+      <p class="lead">
+        Фигуры складываются как в тетрисе, а потом распадаются на песок и сами
+        выравнивают поверхность. Проиграть нельзя, можно только медитативно
+        лепить рельеф.
+      </p>
+
+      <div class="stats">
+        <div class="stat">
+          <span class="label">Фигур</span>
+          <strong id="piecesPlaced">0</strong>
+        </div>
+        <div class="stat">
+          <span class="label">Песка</span>
+          <strong id="sandCells">0</strong>
+        </div>
+        <div class="stat">
+          <span class="label">Рельеф</span>
+          <strong id="surfaceLevel">0</strong>
+        </div>
+      </div>
+
+      <div class="controls">
+        <span>`←` `→` двигать</span>
+        <span>`↑` вращать</span>
+        <span>`↓` ускорить падение</span>
+        <span>`Пробел` сбросить фигуру</span>
+      </div>
+
+      <button id="resetButton" class="reset">Перезапустить</button>
+    </section>
+
+    <section class="board-shell">
+      <canvas id="game" width="420" height="720" aria-label="Игровое поле"></canvas>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
