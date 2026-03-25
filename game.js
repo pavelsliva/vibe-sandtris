@@ -5,6 +5,7 @@ const overlay = document.getElementById("overlay");
 const startPauseButton = document.getElementById("startPauseButton");
 const resetButton = document.getElementById("resetButton");
 const musicToggleButton = document.getElementById("musicToggleButton");
+const musicTrack = document.getElementById("musicTrack");
 const bitcoinCountNode = document.getElementById("bitcoinCount");
 const sessionTimeNode = document.getElementById("sessionTime");
 const totalTimeNode = document.getElementById("totalTime");
@@ -31,8 +32,6 @@ const FUNNEL_ROW = ROWS - 5;
 const FUNNEL_COLUMNS = [4, 5];
 const SAVE_INTERVAL_MS = 2000;
 const STORAGE_KEY = "sandtris-flow-total-ms";
-const TETRIS_LITE_NOTES = [76, 71, 72, 74, 72, 71, 69, 69, 72, 76, 74, 72, 71, 71, 72, 74, 76, 72, 69, 69];
-const TETRIS_LITE_DURATIONS = [0.26, 0.13, 0.13, 0.2, 0.13, 0.13, 0.2, 0.2, 0.2, 0.26, 0.13, 0.13, 0.26, 0.13, 0.13, 0.2, 0.2, 0.2, 0.28, 0.36];
 
 const PALETTE = [
   "#d98d6a",
@@ -88,11 +87,7 @@ let breathAccumulator = 0;
 let breathIndex = 0;
 let isBreathExpanded = false;
 const keysHeld = new Set();
-let audioContext = null;
-let masterGain = null;
 let musicEnabled = false;
-let nextNoteAt = 0;
-let noteIndex = 0;
 
 function createCell() {
   return {
@@ -234,6 +229,18 @@ function softDrop() {
   } else {
     mergePiece();
   }
+}
+
+function hardDrop() {
+  if (!currentPiece || !isRunning) {
+    return;
+  }
+
+  while (!collides(currentPiece.shape, currentPiece.x, currentPiece.y + 1)) {
+    currentPiece.y += 1;
+  }
+
+  mergePiece();
 }
 
 function updateSolidToSand(delta) {
@@ -528,75 +535,20 @@ function persistTime() {
   localStorage.setItem(STORAGE_KEY, String(totalMs + sessionMs));
 }
 
-function ensureAudio() {
-  if (audioContext) {
-    return;
-  }
-
-  audioContext = new window.AudioContext();
-  masterGain = audioContext.createGain();
-  masterGain.gain.value = 0;
-  masterGain.connect(audioContext.destination);
-}
-
-function midiToFrequency(note) {
-  return 440 * (2 ** ((note - 69) / 12));
-}
-
 function setMusicEnabled(enabled) {
   musicEnabled = enabled;
   musicToggleButton.textContent = enabled ? "Мелодия: вкл" : "Мелодия: выкл";
 
-  if (!masterGain || !audioContext) {
+  if (!musicEnabled) {
+    musicTrack.pause();
     return;
   }
 
-  const now = audioContext.currentTime;
-  masterGain.gain.cancelScheduledValues(now);
-  masterGain.gain.linearRampToValueAtTime(enabled ? 0.055 : 0, now + 0.4);
-}
-
-function scheduleMelodyNote(note, duration, startTime) {
-  const voice = audioContext.createOscillator();
-  const voiceGain = audioContext.createGain();
-  const bass = audioContext.createOscillator();
-  const bassGain = audioContext.createGain();
-
-  voice.type = "triangle";
-  voice.frequency.value = midiToFrequency(note);
-  voiceGain.gain.setValueAtTime(0, startTime);
-  voiceGain.gain.linearRampToValueAtTime(0.05, startTime + 0.03);
-  voiceGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
-
-  bass.type = "sine";
-  bass.frequency.value = midiToFrequency(note - 24);
-  bassGain.gain.setValueAtTime(0, startTime);
-  bassGain.gain.linearRampToValueAtTime(0.022, startTime + 0.04);
-  bassGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration + 0.08);
-
-  voice.connect(voiceGain).connect(masterGain);
-  bass.connect(bassGain).connect(masterGain);
-
-  voice.start(startTime);
-  bass.start(startTime);
-  voice.stop(startTime + duration + 0.05);
-  bass.stop(startTime + duration + 0.12);
-}
-
-function tickMusicScheduler() {
-  if (!audioContext || !musicEnabled || !isRunning) {
-    return;
-  }
-
-  while (nextNoteAt < audioContext.currentTime + 0.25) {
-    const melodyIndex = noteIndex % TETRIS_LITE_NOTES.length;
-    scheduleMelodyNote(
-      TETRIS_LITE_NOTES[melodyIndex],
-      TETRIS_LITE_DURATIONS[melodyIndex],
-      nextNoteAt,
-    );
-    nextNoteAt += TETRIS_LITE_DURATIONS[melodyIndex];
-    noteIndex += 1;
+  if (isRunning) {
+    const playPromise = musicTrack.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
   }
 }
 
@@ -613,9 +565,11 @@ function updateBreath(delta) {
 }
 
 function acknowledgeInteraction() {
-  ensureAudio();
-  if (audioContext.state === "suspended") {
-    audioContext.resume();
+  if (musicEnabled && isRunning) {
+    const playPromise = musicTrack.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
   }
 }
 
@@ -627,8 +581,11 @@ function startGame() {
     spawnPiece();
   }
 
-  if (musicEnabled && audioContext) {
-    nextNoteAt = audioContext.currentTime + 0.05;
+  if (musicEnabled) {
+    const playPromise = musicTrack.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
   }
 
   updateOverlay();
@@ -637,6 +594,7 @@ function startGame() {
 
 function pauseGame() {
   isRunning = false;
+  musicTrack.pause();
   updateOverlay();
   updateStats();
 }
@@ -660,6 +618,8 @@ function resetGame() {
   bitcoins = 0;
   hasStarted = false;
   isRunning = false;
+  musicTrack.pause();
+  musicTrack.currentTime = 0;
   breathAccumulator = 0;
   breathIndex = 0;
   breathTextNode.textContent = "вдох";
@@ -704,7 +664,6 @@ function updateGame(delta) {
     drainAccumulator = 0;
   }
 
-  tickMusicScheduler();
   updateStats();
 }
 
@@ -727,6 +686,8 @@ function handleAction(action, active = true) {
     movePiece(1);
   } else if (action === "rotate" && active) {
     rotatePiece();
+  } else if (action === "drop" && active) {
+    hardDrop();
   } else if (action === "down") {
     if (active) {
       keysHeld.add("down");
@@ -750,6 +711,9 @@ function mapKey(eventKey) {
   if (key === "arrowdown" || key === "s") {
     return "down";
   }
+  if (key === " ") {
+    return "drop";
+  }
   return null;
 }
 
@@ -758,7 +722,11 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
   }
 
-  if (event.repeat && event.key !== "ArrowDown" && event.key.toLowerCase() !== "s") {
+  if (
+    event.repeat &&
+    event.key !== "ArrowDown" &&
+    event.key.toLowerCase() !== "s"
+  ) {
     return;
   }
 
@@ -806,9 +774,6 @@ resetButton.addEventListener("click", resetGame);
 musicToggleButton.addEventListener("click", () => {
   acknowledgeInteraction();
   setMusicEnabled(!musicEnabled);
-  if (musicEnabled) {
-    nextNoteAt = audioContext.currentTime + 0.05;
-  }
 });
 
 document.addEventListener(
@@ -834,5 +799,6 @@ function tintColor(hex, amount) {
 }
 
 resetGame();
+musicTrack.volume = 0.35;
 setMusicEnabled(false);
 requestAnimationFrame(frame);
