@@ -1,804 +1,344 @@
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-
-const overlay = document.getElementById("overlay");
-const startPauseButton = document.getElementById("startPauseButton");
-const resetButton = document.getElementById("resetButton");
-const musicToggleButton = document.getElementById("musicToggleButton");
-const musicTrack = document.getElementById("musicTrack");
-const bitcoinCountNode = document.getElementById("bitcoinCount");
-const sessionTimeNode = document.getElementById("sessionTime");
-const totalTimeNode = document.getElementById("totalTime");
-const statusTextNode = document.getElementById("statusText");
-const flowTextNode = document.getElementById("flowText");
-const breathTextNode = document.getElementById("breathText");
-const breathOrbNode = document.getElementById("breathOrb");
-const mobileButtons = document.querySelectorAll("[data-action]");
-
-const COLS = 10;
-const ROWS = 20;
-const CELL = canvas.width / COLS;
-const EMPTY = 0;
-const SOLID = 1;
-const SAND = 2;
-
-const DROP_DELAY = 680;
-const FAST_DROP_DELAY = 110;
-const SOLID_TO_SAND_MS = 700;
-const SAND_STEP_MS = 42;
-const DRAIN_STEP_MS = 90;
-const DRAIN_TRIGGER_ROW = 8;
-const FUNNEL_ROW = ROWS - 5;
-const FUNNEL_COLUMNS = [4, 5];
-const SAVE_INTERVAL_MS = 2000;
-const STORAGE_KEY = "sandtris-flow-total-ms";
-
-const PALETTE = [
-  "#d98d6a",
-  "#d8b06a",
-  "#8ba69b",
-  "#90a7c7",
-  "#bf9dc7",
-  "#df7c79",
-  "#87b8ad",
-];
-
-const SHAPES = [
-  [[1, 1, 1, 1]],
-  [
-    [1, 1],
-    [1, 1],
-  ],
-  [
-    [0, 1, 0],
-    [1, 1, 1],
-  ],
-  [
-    [1, 0, 0],
-    [1, 1, 1],
-  ],
-  [
-    [0, 0, 1],
-    [1, 1, 1],
-  ],
-  [
-    [0, 1, 1],
-    [1, 1, 0],
-  ],
-  [
-    [1, 1, 0],
-    [0, 1, 1],
-  ],
-];
-
-let board = createBoard();
-let currentPiece = null;
-let dropAccumulator = 0;
-let sandAccumulator = 0;
-let drainAccumulator = 0;
-let saveAccumulator = 0;
-let lastFrameTime = 0;
-let sessionMs = 0;
-let totalMs = Number(localStorage.getItem(STORAGE_KEY) || 0);
-let bitcoins = 0;
-let isRunning = false;
-let hasStarted = false;
-let breathAccumulator = 0;
-let breathIndex = 0;
-let isBreathExpanded = false;
-const keysHeld = new Set();
-let musicEnabled = false;
-
-function createCell() {
-  return {
-    state: EMPTY,
-    color: null,
-    ageMs: 0,
-  };
-}
-
-function createBoard() {
-  return Array.from({ length: ROWS }, () =>
-    Array.from({ length: COLS }, () => createCell()),
-  );
-}
-
-function cloneMatrix(matrix) {
-  return matrix.map((row) => [...row]);
-}
-
-function rotateMatrix(matrix) {
-  return matrix[0].map((_, column) => matrix.map((row) => row[column]).reverse());
-}
-
-function roundRect(x, y, width, height, radius) {
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + width - radius, y);
-  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-  ctx.lineTo(x + width, y + height - radius);
-  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-  ctx.lineTo(x + radius, y + height);
-  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
-  ctx.closePath();
-}
-
-function randomChoice(items) {
-  return items[Math.floor(Math.random() * items.length)];
-}
-
-function spawnPiece() {
-  const shape = cloneMatrix(randomChoice(SHAPES));
-  currentPiece = {
-    shape,
-    color: randomChoice(PALETTE),
-    x: Math.floor((COLS - shape[0].length) / 2),
-    y: -1,
-  };
-
-  if (collides(shape, currentPiece.x, currentPiece.y)) {
-    settleSand(10);
-  }
-}
-
-function collides(shape, offsetX, offsetY) {
-  for (let y = 0; y < shape.length; y += 1) {
-    for (let x = 0; x < shape[y].length; x += 1) {
-      if (!shape[y][x]) {
-        continue;
-      }
-
-      const boardX = offsetX + x;
-      const boardY = offsetY + y;
-
-      if (boardX < 0 || boardX >= COLS || boardY >= ROWS) {
-        return true;
-      }
-
-      if (boardY >= 0 && board[boardY][boardX].state !== EMPTY) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function mergePiece() {
-  for (let y = 0; y < currentPiece.shape.length; y += 1) {
-    for (let x = 0; x < currentPiece.shape[y].length; x += 1) {
-      if (!currentPiece.shape[y][x]) {
-        continue;
-      }
-
-      const boardX = currentPiece.x + x;
-      const boardY = currentPiece.y + y;
-
-      if (boardX < 0 || boardX >= COLS || boardY < 0 || boardY >= ROWS) {
-        continue;
-      }
-
-      board[boardY][boardX] = {
-        state: SOLID,
-        color: currentPiece.color,
-        ageMs: 0,
-      };
-    }
-  }
-
-  spawnPiece();
-}
-
-function movePiece(deltaX) {
-  if (!currentPiece || !isRunning) {
-    return;
-  }
-
-  if (!collides(currentPiece.shape, currentPiece.x + deltaX, currentPiece.y)) {
-    currentPiece.x += deltaX;
-    acknowledgeInteraction();
-  }
-}
-
-function rotatePiece() {
-  if (!currentPiece || !isRunning) {
-    return;
-  }
-
-  const rotated = rotateMatrix(currentPiece.shape);
-  const kicks = [0, -1, 1, -2, 2];
-  for (const kick of kicks) {
-    if (!collides(rotated, currentPiece.x + kick, currentPiece.y)) {
-      currentPiece.shape = rotated;
-      currentPiece.x += kick;
-      acknowledgeInteraction();
-      return;
-    }
-  }
-}
-
-function softDrop() {
-  if (!currentPiece || !isRunning) {
-    return;
-  }
-
-  if (!collides(currentPiece.shape, currentPiece.x, currentPiece.y + 1)) {
-    currentPiece.y += 1;
-  } else {
-    mergePiece();
-  }
-}
-
-function hardDrop() {
-  if (!currentPiece || !isRunning) {
-    return;
-  }
-
-  while (!collides(currentPiece.shape, currentPiece.x, currentPiece.y + 1)) {
-    currentPiece.y += 1;
-  }
-
-  mergePiece();
-}
-
-function updateSolidToSand(delta) {
-  for (let y = 0; y < ROWS; y += 1) {
-    for (let x = 0; x < COLS; x += 1) {
-      const cell = board[y][x];
-      if (cell.state !== SOLID) {
-        continue;
-      }
-
-      cell.ageMs += delta;
-      if (cell.ageMs >= SOLID_TO_SAND_MS) {
-        cell.state = SAND;
-        cell.ageMs = 0;
-      }
-    }
-  }
-}
-
-function moveSand(fromX, fromY, toX, toY) {
-  if (toX < 0 || toX >= COLS || toY < 0 || toY >= ROWS) {
-    return false;
-  }
-
-  if (board[toY][toX].state !== EMPTY) {
-    return false;
-  }
-
-  board[toY][toX] = board[fromY][fromX];
-  board[fromY][fromX] = createCell();
-  return true;
-}
-
-function distanceToFunnel(x) {
-  return Math.min(...FUNNEL_COLUMNS.map((column) => Math.abs(column - x)));
-}
-
-function tryFlowTowardsFunnel(x, y) {
-  const nearestColumn = FUNNEL_COLUMNS.reduce((best, column) =>
-    Math.abs(column - x) < Math.abs(best - x) ? column : best,
-  );
-  const direction = Math.sign(nearestColumn - x);
-
-  if (!direction) {
-    return false;
-  }
-
-  if (moveSand(x, y, x + direction, y)) {
-    return true;
-  }
-
-  return moveSand(x, y, x + direction, y + 1);
-}
-
-function settleSand(iterations = 1) {
-  for (let step = 0; step < iterations; step += 1) {
-    for (let y = ROWS - 2; y >= 0; y -= 1) {
-      const traverseRight = Math.random() > 0.5;
-      const start = traverseRight ? COLS - 1 : 0;
-      const end = traverseRight ? -1 : COLS;
-      const increment = traverseRight ? -1 : 1;
-
-      for (let x = start; x !== end; x += increment) {
-        if (board[y][x].state !== SAND) {
-          continue;
-        }
-
-        if (moveSand(x, y, x, y + 1)) {
-          continue;
-        }
-
-        const closeToFunnel = y >= FUNNEL_ROW && shouldDrain();
-        if (closeToFunnel && tryFlowTowardsFunnel(x, y)) {
-          continue;
-        }
-
-        const lateral = traverseRight ? [1, -1] : [-1, 1];
-        for (const dir of lateral) {
-          if (moveSand(x, y, x + dir, y + 1)) {
-            break;
-          }
-        }
-
-        if (closeToFunnel && distanceToFunnel(x) <= 2) {
-          tryFlowTowardsFunnel(x, y);
-        }
-      }
-    }
-  }
-}
-
-function getAverageFilledRow() {
-  let filled = 0;
-  for (let y = 0; y < ROWS; y += 1) {
-    for (let x = 0; x < COLS; x += 1) {
-      if (board[y][x].state !== EMPTY) {
-        filled += 1;
-      }
-    }
-  }
-
-  return filled / COLS;
-}
-
-function shouldDrain() {
-  return getAverageFilledRow() >= DRAIN_TRIGGER_ROW;
-}
-
-function drainSand() {
-  if (!shouldDrain()) {
-    return;
-  }
-
-  let removed = 0;
-
-  for (const column of FUNNEL_COLUMNS) {
-    const cell = board[ROWS - 1][column];
-    if (cell.state === SAND) {
-      board[ROWS - 1][column] = createCell();
-      removed += 1;
-    }
-  }
-
-  if (!removed) {
-    for (let y = ROWS - 2; y >= FUNNEL_ROW; y -= 1) {
-      for (const column of FUNNEL_COLUMNS) {
-        if (board[y][column].state === SAND && board[y + 1][column].state === EMPTY) {
-          moveSand(column, y, column, y + 1);
-        }
-      }
-    }
-  }
-
-  if (removed > 0) {
-    bitcoins += removed * 2;
-  }
-}
-
-function drawBackground() {
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, "#111720");
-  gradient.addColorStop(0.58, "#18202a");
-  gradient.addColorStop(1, "#231912");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
-  for (let y = 0; y <= ROWS; y += 1) {
-    ctx.fillRect(0, y * CELL, canvas.width, 1);
-  }
-
-  const glow = ctx.createRadialGradient(
-    canvas.width / 2,
-    canvas.height - 10,
-    10,
-    canvas.width / 2,
-    canvas.height - 10,
-    120,
-  );
-  glow.addColorStop(0, "rgba(242, 207, 150, 0.2)");
-  glow.addColorStop(1, "rgba(242, 207, 150, 0)");
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, canvas.height - 140, canvas.width, 140);
-
-  ctx.fillStyle = "rgba(242, 207, 150, 0.1)";
-  ctx.beginPath();
-  ctx.moveTo(canvas.width / 2 - CELL * 2.2, canvas.height - CELL * 4.3);
-  ctx.lineTo(canvas.width / 2 - CELL * 0.55, canvas.height - CELL * 0.3);
-  ctx.lineTo(canvas.width / 2 + CELL * 0.55, canvas.height - CELL * 0.3);
-  ctx.lineTo(canvas.width / 2 + CELL * 2.2, canvas.height - CELL * 4.3);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = "rgba(242, 207, 150, 0.2)";
-  roundRect(canvas.width / 2 - CELL * 0.72, canvas.height - 10, CELL * 1.44, 12, 6);
-  ctx.fill();
-}
-
-function drawBlock(x, y, color) {
-  const px = x * CELL + 3;
-  const py = y * CELL + 3;
-  const size = CELL - 6;
-
-  ctx.fillStyle = color;
-  roundRect(px, py, size, size, 8);
-  ctx.fill();
-
-  ctx.fillStyle = "rgba(255,255,255,0.1)";
-  roundRect(px + 3, py + 3, size - 6, size * 0.28, 6);
-  ctx.fill();
-}
-
-function drawSand(x, y, color) {
-  const px = x * CELL;
-  const py = y * CELL;
-  const grains = [
-    [0.12, 0.2, 0.18],
-    [0.24, 0.38, 0.15],
-    [0.41, 0.16, 0.14],
-    [0.56, 0.28, 0.15],
-    [0.69, 0.2, 0.13],
-    [0.18, 0.62, 0.14],
-    [0.38, 0.56, 0.16],
-    [0.54, 0.52, 0.13],
-    [0.72, 0.6, 0.15],
-    [0.48, 0.76, 0.12],
-  ];
-  const shade = y / ROWS;
-
-  for (const [gx, gy, size] of grains) {
-    ctx.fillStyle = tintColor(color, 0.18 - shade * 0.22);
-    ctx.beginPath();
-    ctx.arc(px + CELL * gx, py + CELL * gy, CELL * size * 0.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.fillStyle = tintColor(color, -0.18);
-  ctx.fillRect(px + CELL * 0.08, py + CELL * 0.84, CELL * 0.84, CELL * 0.08);
-}
-
-function drawBoard() {
-  drawBackground();
-
-  for (let y = 0; y < ROWS; y += 1) {
-    for (let x = 0; x < COLS; x += 1) {
-      const cell = board[y][x];
-      if (cell.state === EMPTY) {
-        continue;
-      }
-
-      if (cell.state === SOLID) {
-        drawBlock(x, y, cell.color);
-      } else {
-        drawSand(x, y, cell.color);
-      }
-    }
-  }
-}
-
-function drawCurrentPiece() {
-  if (!currentPiece) {
-    return;
-  }
-
-  for (let y = 0; y < currentPiece.shape.length; y += 1) {
-    for (let x = 0; x < currentPiece.shape[y].length; x += 1) {
-      if (!currentPiece.shape[y][x]) {
-        continue;
-      }
-
-      const boardY = currentPiece.y + y;
-      if (boardY < 0) {
-        continue;
-      }
-
-      drawBlock(currentPiece.x + x, boardY, currentPiece.color);
-    }
-  }
-}
-
-function formatTime(ms) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function updateStats() {
-  bitcoinCountNode.textContent = String(bitcoins);
-  sessionTimeNode.textContent = formatTime(sessionMs);
-  totalTimeNode.textContent = formatTime(totalMs + sessionMs);
-  statusTextNode.textContent = isRunning ? "В потоке" : "Пауза";
-
-  const height = getAverageFilledRow();
-  if (height < 4) {
-    flowTextNode.textContent = "едва шуршит";
-  } else if (height < 8) {
-    flowTextNode.textContent = "спокойный";
-  } else if (height < 12) {
-    flowTextNode.textContent = "собирает слои";
-  } else {
-    flowTextNode.textContent = "песочные часы";
-  }
-}
-
-function updateOverlay() {
-  overlay.classList.toggle("hidden", hasStarted);
-  startPauseButton.textContent = isRunning ? "Пауза" : hasStarted ? "Продолжить" : "Старт";
-}
-
-function persistTime() {
-  localStorage.setItem(STORAGE_KEY, String(totalMs + sessionMs));
-}
-
-function setMusicEnabled(enabled) {
-  musicEnabled = enabled;
-  musicToggleButton.textContent = enabled ? "Мелодия: вкл" : "Мелодия: выкл";
-
-  if (!musicEnabled) {
-    musicTrack.pause();
-    return;
-  }
-
-  if (isRunning) {
-    const playPromise = musicTrack.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {});
-    }
-  }
-}
-
-function updateBreath(delta) {
-  breathAccumulator += delta;
-  const phases = ["вдох", "выдох", "пауза"];
-  if (breathAccumulator >= 3200) {
-    breathAccumulator = 0;
-    breathIndex = (breathIndex + 1) % phases.length;
-    breathTextNode.textContent = phases[breathIndex];
-    isBreathExpanded = phases[breathIndex] === "вдох";
-    breathOrbNode.classList.toggle("expand", isBreathExpanded);
-  }
-}
-
-function acknowledgeInteraction() {
-  if (musicEnabled && isRunning) {
-    const playPromise = musicTrack.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {});
-    }
-  }
-}
-
-function startGame() {
-  acknowledgeInteraction();
-  hasStarted = true;
-  isRunning = true;
-  if (!currentPiece) {
-    spawnPiece();
-  }
-
-  if (musicEnabled) {
-    const playPromise = musicTrack.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch(() => {});
-    }
-  }
-
-  updateOverlay();
-  updateStats();
-}
-
-function pauseGame() {
-  isRunning = false;
-  musicTrack.pause();
-  updateOverlay();
-  updateStats();
-}
-
-function toggleStartPause() {
-  if (isRunning) {
-    pauseGame();
-  } else {
-    startGame();
-  }
-}
-
-function resetGame() {
-  board = createBoard();
-  currentPiece = null;
-  dropAccumulator = 0;
-  sandAccumulator = 0;
-  drainAccumulator = 0;
-  saveAccumulator = 0;
-  sessionMs = 0;
-  bitcoins = 0;
-  hasStarted = false;
-  isRunning = false;
-  musicTrack.pause();
-  musicTrack.currentTime = 0;
-  breathAccumulator = 0;
-  breathIndex = 0;
-  breathTextNode.textContent = "вдох";
-  breathOrbNode.classList.remove("expand");
-  spawnPiece();
-  updateOverlay();
-  updateStats();
-}
-
-function updateGame(delta) {
-  updateBreath(delta);
-
-  if (!isRunning) {
-    return;
-  }
-
-  sessionMs += delta;
-  dropAccumulator += delta;
-  sandAccumulator += delta;
-  drainAccumulator += delta;
-  saveAccumulator += delta;
-
-  if (saveAccumulator >= SAVE_INTERVAL_MS) {
-    saveAccumulator = 0;
-    persistTime();
-  }
-
-  const dropDelay = keysHeld.has("down") ? FAST_DROP_DELAY : DROP_DELAY;
-  if (dropAccumulator >= dropDelay) {
-    softDrop();
-    dropAccumulator = 0;
-  }
-
-  if (sandAccumulator >= SAND_STEP_MS) {
-    updateSolidToSand(sandAccumulator);
-    settleSand(2);
-    sandAccumulator = 0;
-  }
-
-  if (drainAccumulator >= DRAIN_STEP_MS) {
-    drainSand();
-    drainAccumulator = 0;
-  }
-
-  updateStats();
-}
-
-function frame(time) {
-  const delta = Math.min(time - lastFrameTime || 16, 34);
-  lastFrameTime = time;
-
-  updateGame(delta);
-  drawBoard();
-  drawCurrentPiece();
-  requestAnimationFrame(frame);
-}
-
-function handleAction(action, active = true) {
-  acknowledgeInteraction();
-
-  if (action === "left" && active) {
-    movePiece(-1);
-  } else if (action === "right" && active) {
-    movePiece(1);
-  } else if (action === "rotate" && active) {
-    rotatePiece();
-  } else if (action === "drop" && active) {
-    hardDrop();
-  } else if (action === "down") {
-    if (active) {
-      keysHeld.add("down");
-    } else {
-      keysHeld.delete("down");
-    }
-  }
-}
-
-function mapKey(eventKey) {
-  const key = eventKey.toLowerCase();
-  if (key === "arrowleft" || key === "a") {
-    return "left";
-  }
-  if (key === "arrowright" || key === "d") {
-    return "right";
-  }
-  if (key === "arrowup" || key === "w" || key === "x") {
-    return "rotate";
-  }
-  if (key === "arrowdown" || key === "s") {
-    return "down";
-  }
-  if (key === " ") {
-    return "drop";
-  }
-  return null;
-}
-
-window.addEventListener("keydown", (event) => {
-  if (event.key === " " || event.key.startsWith("Arrow")) {
-    event.preventDefault();
-  }
-
-  if (
-    event.repeat &&
-    event.key !== "ArrowDown" &&
-    event.key.toLowerCase() !== "s"
-  ) {
-    return;
-  }
-
-  const action = mapKey(event.key);
-  if (action) {
-    if (!hasStarted) {
-      startGame();
-    }
-    handleAction(action, true);
-  }
-});
-
-window.addEventListener("keyup", (event) => {
-  const action = mapKey(event.key);
-  if (action === "down") {
-    handleAction(action, false);
-  }
-});
-
-for (const button of mobileButtons) {
-  const { action } = button.dataset;
-  const onPress = (event) => {
-    event.preventDefault();
-    if (!hasStarted) {
-      startGame();
-    }
-    handleAction(action, true);
-  };
-
-  const onRelease = (event) => {
-    event.preventDefault();
-    if (action === "down") {
-      handleAction(action, false);
-    }
-  };
-
-  button.addEventListener("pointerdown", onPress);
-  button.addEventListener("pointerup", onRelease);
-  button.addEventListener("pointercancel", onRelease);
-  button.addEventListener("pointerleave", onRelease);
-}
-
-startPauseButton.addEventListener("click", toggleStartPause);
-resetButton.addEventListener("click", resetGame);
-musicToggleButton.addEventListener("click", () => {
-  acknowledgeInteraction();
-  setMusicEnabled(!musicEnabled);
-});
-
-document.addEventListener(
-  "visibilitychange",
-  () => {
-    if (document.hidden && isRunning) {
-      pauseGame();
-    }
+const startButton = document.getElementById("startButton");
+const questionPrompt = document.getElementById("questionPrompt");
+const answersNode = document.getElementById("answers");
+const progressLabel = document.getElementById("progressLabel");
+const progressFill = document.getElementById("progressFill");
+const backButton = document.getElementById("backButton");
+const restartButton = document.getElementById("restartButton");
+const replayButton = document.getElementById("replayButton");
+const resultCard = document.getElementById("resultCard");
+const resultTitle = document.getElementById("resultTitle");
+const resultSummary = document.getElementById("resultSummary");
+const resultMeaning = document.getElementById("resultMeaning");
+const resultAdvice = document.getElementById("resultAdvice");
+const automationScoreNode = document.getElementById("automationScore");
+const augmentationScoreNode = document.getElementById("augmentationScore");
+const humanEdgeScoreNode = document.getElementById("humanEdgeScore");
+
+const QUESTIONS = [
+  {
+    prompt: "Сколько в твоей работе повторяющихся цифровых задач, которые можно описать как понятный workflow?",
+    answers: [
+      ["Почти вся работа так устроена", { automation: 3, augmentation: 2, human: 0 }],
+      ["Таких задач много, но не все", { automation: 2, augmentation: 2, human: 1 }],
+      ["Есть немного, но ядро работы не в этом", { automation: 1, augmentation: 1, human: 2 }],
+      ["Почти каждый кейс уникален", { automation: 0, augmentation: 1, human: 3 }],
+    ],
   },
-);
+  {
+    prompt: "Твоя работа в основном происходит в тексте, табличках, документах, презентациях, коде или переписке?",
+    answers: [
+      ["Да, это почти целиком цифровая работа", { automation: 3, augmentation: 3, human: 0 }],
+      ["Сильно завязана на цифру, но не только", { automation: 2, augmentation: 3, human: 1 }],
+      ["Примерно пополам", { automation: 1, augmentation: 2, human: 2 }],
+      ["Нет, главное происходит офлайн", { automation: 0, augmentation: 1, human: 3 }],
+    ],
+  },
+  {
+    prompt: "Насколько качество результата можно проверить по четким критериям, без большого пространства для вкуса и нюансов?",
+    answers: [
+      ["Почти полностью можно проверить формально", { automation: 3, augmentation: 2, human: 0 }],
+      ["Во многом да, но нюансы тоже важны", { automation: 2, augmentation: 2, human: 1 }],
+      ["Формальные критерии есть, но они не решают все", { automation: 1, augmentation: 2, human: 2 }],
+      ["Нет, многое держится на вкусе, доверии и контексте", { automation: 0, augmentation: 1, human: 3 }],
+    ],
+  },
+  {
+    prompt: "Насколько в твоей работе важны живые переговоры, чтение комнаты, политическое чутье и управление людьми?",
+    answers: [
+      ["Почти не важны", { automation: 3, augmentation: 1, human: 0 }],
+      ["Иногда нужны", { automation: 2, augmentation: 2, human: 1 }],
+      ["Очень важны", { automation: 1, augmentation: 1, human: 3 }],
+      ["Без этого работа просто не существует", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+  {
+    prompt: "Если дать ИИ хороший промпт и примеры, насколько большую часть твоего чернового результата он уже мог бы сделать сейчас?",
+    answers: [
+      ["Большую часть", { automation: 3, augmentation: 3, human: 0 }],
+      ["Где-то половину", { automation: 2, augmentation: 3, human: 1 }],
+      ["Только вспомогательные куски", { automation: 1, augmentation: 2, human: 2 }],
+      ["Почти ничего ценного", { automation: 0, augmentation: 1, human: 3 }],
+    ],
+  },
+  {
+    prompt: "Насколько твой доход зависит от твоего личного вкуса, имени, репутации или специфического человеческого почерка?",
+    answers: [
+      ["Почти не зависит", { automation: 3, augmentation: 1, human: 0 }],
+      ["Зависит немного", { automation: 2, augmentation: 2, human: 1 }],
+      ["Заметно зависит", { automation: 1, augmentation: 2, human: 3 }],
+      ["Это вообще основа ценности", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+  {
+    prompt: "Есть ли в твоей работе реальная физическая среда: люди, пространство, техника, объекты, съемка, монтаж руками, встречи на месте?",
+    answers: [
+      ["Почти нет", { automation: 3, augmentation: 2, human: 0 }],
+      ["Немного есть", { automation: 2, augmentation: 2, human: 1 }],
+      ["Да, это ощутимая часть", { automation: 1, augmentation: 1, human: 3 }],
+      ["Да, без физического мира ничего не работает", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+  {
+    prompt: "Насколько часто ты делаешь суммаризацию, ресерч, адаптацию, подготовку драфтов или вариаций одного и того же материала?",
+    answers: [
+      ["Это большой кусок работы", { automation: 3, augmentation: 3, human: 0 }],
+      ["Это происходит регулярно", { automation: 2, augmentation: 3, human: 1 }],
+      ["Иногда бывает", { automation: 1, augmentation: 2, human: 2 }],
+      ["Почти никогда", { automation: 0, augmentation: 1, human: 3 }],
+    ],
+  },
+  {
+    prompt: "Насколько твоя работа состоит из принятия ответственности в неоднозначных, рискованных или политически чувствительных ситуациях?",
+    answers: [
+      ["Почти не состоит", { automation: 3, augmentation: 2, human: 0 }],
+      ["Иногда это встречается", { automation: 2, augmentation: 2, human: 1 }],
+      ["Это важная часть роли", { automation: 1, augmentation: 1, human: 3 }],
+      ["Это буквально центр работы", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+  {
+    prompt: "Если разбить твою работу на маленькие шаги, можно ли большую часть из них раздать как отдельные инструкции?",
+    answers: [
+      ["Да, почти все так и раскладывается", { automation: 3, augmentation: 2, human: 0 }],
+      ["Во многом да", { automation: 2, augmentation: 2, human: 1 }],
+      ["Только часть работы", { automation: 1, augmentation: 2, human: 2 }],
+      ["Нет, все слишком связано и контекстно", { automation: 0, augmentation: 1, human: 3 }],
+    ],
+  },
+  {
+    prompt: "Какую долю в твоей работе занимает создание чего-то нового с высоким уровнем оригинальности, а не переработка уже знакомых паттернов?",
+    answers: [
+      ["Оригинальности мало, больше сборка из паттернов", { automation: 3, augmentation: 2, human: 0 }],
+      ["Есть и то и другое", { automation: 2, augmentation: 3, human: 1 }],
+      ["Оригинальность важна", { automation: 1, augmentation: 2, human: 3 }],
+      ["Это почти целиком про новый угол зрения", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+  {
+    prompt: "Насколько ценен в твоей работе именно контакт с человеком: эмпатия, доверие, ощущение присутствия и 'меня поняли'?",
+    answers: [
+      ["Почти не ценен", { automation: 3, augmentation: 1, human: 0 }],
+      ["Скорее полезен, но не критичен", { automation: 2, augmentation: 2, human: 1 }],
+      ["Очень ценен", { automation: 1, augmentation: 1, human: 3 }],
+      ["Без него клиенты не платят", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+  {
+    prompt: "Если бы завтра у тебя появился сильный ИИ-ассистент, насколько он увеличил бы твою личную продуктивность?",
+    answers: [
+      ["Резко увеличил бы", { automation: 2, augmentation: 4, human: 1 }],
+      ["Сильно помог бы", { automation: 2, augmentation: 3, human: 1 }],
+      ["Скорее местами помог бы", { automation: 1, augmentation: 2, human: 2 }],
+      ["Почти не помог бы", { automation: 0, augmentation: 1, human: 3 }],
+    ],
+  },
+  {
+    prompt: "Насколько твоя работа завязана на внутренний контекст компании, неформальные знания, людей и скрытые договоренности?",
+    answers: [
+      ["Почти не завязана", { automation: 3, augmentation: 2, human: 0 }],
+      ["Есть зависимость, но не решающая", { automation: 2, augmentation: 2, human: 1 }],
+      ["Очень завязана", { automation: 1, augmentation: 1, human: 3 }],
+      ["Без этого контекста нельзя сделать работу", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+  {
+    prompt: "Если смотреть на твой рынок честно, больше давит риск 'ИИ заменит junior/middle-слой' или 'ИИ усилит лучших, а остальных отожмет'?",
+    answers: [
+      ["Скорее заменит нижний слой задач", { automation: 3, augmentation: 2, human: 0 }],
+      ["И то и другое похоже на правду", { automation: 2, augmentation: 3, human: 1 }],
+      ["Скорее усилит сильных, а не заменит всех", { automation: 1, augmentation: 3, human: 2 }],
+      ["Пока рынок держится на людях сильнее, чем на автоматизации", { automation: 0, augmentation: 1, human: 4 }],
+    ],
+  },
+];
 
-window.addEventListener("beforeunload", persistTime);
+const RESULTS = [
+  {
+    id: "assistant",
+    when: (scores) => scores.automation <= 35 && scores.human >= 68,
+    title: "ИИ скорее будет твоим стажером",
+    summary:
+      "У тебя много того, что плохо живет без человека: контекст, доверие, живая среда, вкус или ответственность. ИИ здесь скорее помощник, чем захватчик офиса.",
+    meaning:
+      "На твоем поле ИИ полезен для подготовки, ускорения и рутины, но основная ценность пока держится на человеческом факторе. То есть не расслабляться, но и паниковать рано.",
+    advice: [
+      "Систематизируй то, что можно делегировать ИИ, чтобы самому работать на более дорогом уровне.",
+      "Усиливай репутацию, вкус, переговорные навыки и личную субъектность.",
+      "Думай не 'как защититься от ИИ', а 'как стать человеком, который управляет ИИ-слоем'.",
+    ],
+  },
+  {
+    id: "copilot",
+    when: (scores) => scores.augmentation >= 70 && scores.automation < 60,
+    title: "ИИ станет твоим соавтором",
+    summary:
+      "Твою работу пока не так легко обнулить целиком, но ее уже очень удобно ускорять. Лучший сценарий для тебя не война с ИИ, а быстрый союз.",
+    meaning:
+      "Главный риск не в том, что профессия исчезнет совсем, а в том, что люди с хорошим AI-процессом начнут делать ту же работу быстрее, дешевле и в большем объеме. Конкуренция сместится в сторону скорости, отбора и финальной упаковки.",
+    advice: [
+      "Учись строить пайплайн: ресерч, драфт, вариации, проверка, финализация.",
+      "Поднимай планку финального вкуса и решения задач, а не только ручного производства.",
+      "Собирай кейсы, где ИИ дает ускорение, но не убивает качество.",
+    ],
+  },
+  {
+    id: "squeeze",
+    when: (scores) => scores.automation >= 60 && scores.human < 55,
+    title: "Твою роль могут начать сжимать",
+    summary:
+      "Не обязательно завтра, но давление будет ощущаться: рутинные цифровые задачи, шаблонная интеллектуальная работа и драфтовый слой уже выглядят уязвимо.",
+    meaning:
+      "Главная опасность не в магической полной замене, а в том, что часть задач станет слишком дешевой. В этот момент рынок начинает меньше платить за просто аккуратное исполнение по шаблону.",
+    advice: [
+      "Смещайся от механического производства к постановке задач, отбору и ответственности за результат.",
+      "Добавляй офлайн-компоненту, доверие, вкус, персональный угол зрения или доменную экспертизу.",
+      "Не строй карьеру только на том, что легко разложить на повторяемые цифровые шаги.",
+    ],
+  },
+  {
+    id: "rebuild",
+    when: (scores) => scores.automation >= 72,
+    title: "Пора пересобирать позиционирование",
+    summary:
+      "Если смотреть без самоуспокоения, у тебя высокий риск попадания под автоматизацию или хотя бы сильное обесценивание части задач в ближайшие годы.",
+    meaning:
+      "Это не приговор и не 'тебя увольняют роботы завтра утром'. Но это сигнал, что прежняя упаковка профессии может быстро подешеветь. Нужен следующий слой ценности.",
+    advice: [
+      "Уходи выше по цепочке: стратегия, ответственность, клиентская работа, принятие решений.",
+      "Освой ИИ так, чтобы он не заменял тебя, а входил в твою новую профессиональную сборку.",
+      "Думай не про должность, а про набор задач, которые рынок все еще готов доверять человеку.",
+    ],
+  },
+  {
+    id: "hybrid",
+    when: () => true,
+    title: "У тебя гибридная зона риска",
+    summary:
+      "Картина смешанная: часть твоей работы уже прекрасно дружит с ИИ, часть держится на человеческом контексте. Это не красная кнопка, а момент для тонкой перенастройки.",
+    meaning:
+      "Скорее всего, твоя роль не исчезнет целиком, но изменится ее состав. Рутинный, черновой, цифровой слой будет все сильнее ужиматься, а человеческая часть дорожать.",
+    advice: [
+      "Раздели свою работу на автоматизируемый слой и на слой, где нужен ты как человек.",
+      "Определи, за что тебе реально платят: за производство или за суждение.",
+      "Четко сформулируй, в чем твоя незаменимая сила, и начни опираться на нее как на главный актив.",
+    ],
+  },
+];
 
-function tintColor(hex, amount) {
-  const normalized = hex.replace("#", "");
-  const channels = normalized.match(/.{1,2}/g).map((channel) => parseInt(channel, 16));
-  const adjusted = channels.map((channel) => {
-    const target = amount >= 0 ? 255 : 0;
-    const mix = Math.abs(amount);
-    return Math.round(channel + (target - channel) * mix);
-  });
-  return `rgb(${adjusted[0]}, ${adjusted[1]}, ${adjusted[2]})`;
+let currentIndex = 0;
+let answers = [];
+
+function clampPercent(value, maxRaw) {
+  return Math.round((value / maxRaw) * 100);
 }
 
-resetGame();
-musicTrack.volume = 0.35;
-setMusicEnabled(false);
-requestAnimationFrame(frame);
+function renderQuestion() {
+  const question = QUESTIONS[currentIndex];
+  questionPrompt.textContent = question.prompt;
+  progressLabel.textContent = `Вопрос ${currentIndex + 1} из ${QUESTIONS.length}`;
+  progressFill.style.width = `${((currentIndex + 1) / QUESTIONS.length) * 100}%`;
+  answersNode.innerHTML = "";
+
+  question.answers.forEach(([label, score], answerIndex) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.innerHTML = `
+      <span class="answer-title">${String.fromCharCode(65 + answerIndex)}. ${label}</span>
+      <span class="answer-text">${describeAnswer(score)}</span>
+    `;
+    button.addEventListener("click", () => handleAnswer(score));
+    answersNode.appendChild(button);
+  });
+
+  backButton.disabled = currentIndex === 0;
+}
+
+function describeAnswer(score) {
+  if (score.automation >= 3) {
+    return "Такой вариант повышает шанс, что эту часть работы начнут сильнее автоматизировать.";
+  }
+  if (score.human >= 3) {
+    return "Здесь пока заметно важнее живой человек, контекст и личное участие.";
+  }
+  if (score.augmentation >= 3) {
+    return "Это больше похоже на зону, где ИИ будет помогать и ускорять, а не просто заменять.";
+  }
+  return "Здесь нет явного перекоса: все зависит от того, как именно устроена твоя работа.";
+}
+
+function handleAnswer(score) {
+  answers[currentIndex] = score;
+
+  if (currentIndex < QUESTIONS.length - 1) {
+    currentIndex += 1;
+    renderQuestion();
+    return;
+  }
+
+  showResults();
+}
+
+function computeScores() {
+  const raw = answers.reduce(
+    (accumulator, answer) => ({
+      automation: accumulator.automation + answer.automation,
+      augmentation: accumulator.augmentation + answer.augmentation,
+      human: accumulator.human + answer.human,
+    }),
+    { automation: 0, augmentation: 0, human: 0 },
+  );
+
+  return {
+    automation: clampPercent(raw.automation, QUESTIONS.length * 3),
+    augmentation: clampPercent(raw.augmentation, QUESTIONS.length * 4),
+    human: clampPercent(raw.human, QUESTIONS.length * 4),
+  };
+}
+
+function showResults() {
+  const scores = computeScores();
+  const result = RESULTS.find((entry) => entry.when(scores));
+
+  resultTitle.textContent = result.title;
+  resultSummary.textContent = result.summary;
+  resultMeaning.textContent = result.meaning;
+  automationScoreNode.textContent = `${scores.automation}%`;
+  augmentationScoreNode.textContent = `${scores.augmentation}%`;
+  humanEdgeScoreNode.textContent = `${scores.human}%`;
+
+  resultAdvice.innerHTML = "";
+  result.advice.forEach((line) => {
+    const item = document.createElement("li");
+    item.textContent = line;
+    resultAdvice.appendChild(item);
+  });
+
+  resultCard.classList.remove("hidden");
+  resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function resetQuiz() {
+  currentIndex = 0;
+  answers = [];
+  resultCard.classList.add("hidden");
+  renderQuestion();
+}
+
+startButton.addEventListener("click", () => {
+  document.querySelector(".quiz").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+backButton.addEventListener("click", () => {
+  if (currentIndex === 0) {
+    return;
+  }
+
+  currentIndex -= 1;
+  renderQuestion();
+});
+
+restartButton.addEventListener("click", resetQuiz);
+replayButton.addEventListener("click", resetQuiz);
+
+resetQuiz();

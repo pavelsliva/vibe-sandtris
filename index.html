@@ -2,108 +2,107 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Sandtris Flow</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Заменит Ли Тебя ИИ?</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <audio
-    id="musicTrack"
-    src="la-petite-fille-de-la-mer-remastered.mp3"
-    preload="auto"
-    loop
-  ></audio>
   <main class="app">
-    <section class="panel intro">
-      <p class="eyebrow">Anti-stress Sand Tetris</p>
-      <h1>Sandtris Flow</h1>
+    <section class="hero panel">
+      <p class="eyebrow">Quiz / Future Of Work</p>
+      <h1>Заменит ли тебя ИИ в ближайшие годы?</h1>
       <p class="lead">
-        Это тетрис без поражения: фигуры падают, превращаются в цветной песок,
-        слои медленно текут вниз, а хаос все равно становится красивым.
+        15 вопросов о твоей работе. На выходе не кликбейт-страшилка, а более
+        честная оценка: что у тебя автоматизируется, где ИИ станет соавтором, а
+        где пока все еще нужен живой человек.
       </p>
 
-      <div class="intro-card">
-        <p class="intro-title">Небольшое правило этой вселенной</p>
-        <p>
-          Здесь невозможно проиграть. Ты просто перекладываешь форму в поток,
-          а поток превращает ее в мягкий узор и шуточные биткоины.
-        </p>
-      </div>
-
-      <div class="stats">
-        <article class="stat">
-          <span class="label">Биткоины</span>
-          <strong id="bitcoinCount">0</strong>
-          <small>несерьезное богатство</small>
+      <div class="meta-grid">
+        <article class="meta-card">
+          <span class="meta-label">Формат</span>
+          <strong>15 вопросов</strong>
+          <small>3-4 минуты</small>
         </article>
-        <article class="stat">
-          <span class="label">Сессия</span>
-          <strong id="sessionTime">00:00</strong>
-          <small>время в потоке</small>
+        <article class="meta-card">
+          <span class="meta-label">Основа</span>
+          <strong>Anthropic-inspired</strong>
+          <small>automation + augmentation</small>
         </article>
-        <article class="stat">
-          <span class="label">Всего сыграно</span>
-          <strong id="totalTime">00:00</strong>
-          <small>сохраняется локально</small>
+        <article class="meta-card">
+          <span class="meta-label">Тон</span>
+          <strong>С иронией</strong>
+          <small>но без ерунды</small>
         </article>
       </div>
 
-      <div class="toolbar">
-        <button id="startPauseButton" class="primary">Старт</button>
-        <button id="resetButton" class="secondary">Перезапуск</button>
-      </div>
+      <button id="startButton" class="primary-action">Начать викторину</button>
+    </section>
 
-      <div class="toolbar">
-        <button id="musicToggleButton" class="secondary">Мелодия: выкл</button>
-      </div>
-
-      <div class="breath-card">
-        <div id="breathOrb" class="breath-orb" aria-hidden="true"></div>
+    <section class="quiz panel">
+      <div class="quiz-head">
         <div>
-          <p class="intro-title">Дыхательный ритм</p>
-          <p id="breathText" class="breath-text">вдох</p>
+          <p class="eyebrow">Прогресс</p>
+          <strong id="progressLabel">Вопрос 1 из 15</strong>
+        </div>
+        <div class="progress-bar">
+          <div id="progressFill" class="progress-fill"></div>
         </div>
       </div>
 
-      <div class="help-grid">
-        <span><kbd>←</kbd> <kbd>→</kbd> или <kbd>A</kbd> <kbd>D</kbd> двигать</span>
-        <span><kbd>↑</kbd> или <kbd>W</kbd> вращать</span>
-        <span><kbd>↓</kbd> или <kbd>S</kbd> мягко ускорять</span>
-        <span><kbd>Space</kbd> резко бросить фигуру вниз</span>
-        <span>На телефоне используй кнопки снизу одной рукой</span>
+      <article id="questionCard" class="question-card">
+        <p id="questionPrompt" class="question-prompt"></p>
+        <div id="answers" class="answers"></div>
+      </article>
+
+      <div class="quiz-foot">
+        <button id="backButton" class="secondary-action" type="button">Назад</button>
+        <button id="restartButton" class="ghost-action" type="button">Сбросить</button>
       </div>
     </section>
 
-    <section class="board-panel">
-      <div class="canvas-head">
-        <div>
-          <p class="mini-label">Статус</p>
-          <strong id="statusText">Пауза</strong>
-        </div>
-        <div>
-          <p class="mini-label">Песочный поток</p>
-          <strong id="flowText">спокойный</strong>
-        </div>
+    <section id="resultCard" class="result panel hidden">
+      <p class="eyebrow">Результат</p>
+      <h2 id="resultTitle"></h2>
+      <p id="resultSummary" class="result-summary"></p>
+
+      <div class="score-grid">
+        <article class="score-card">
+          <span class="meta-label">Риск автоматизации</span>
+          <strong id="automationScore">0%</strong>
+        </article>
+        <article class="score-card">
+          <span class="meta-label">Шанс усиления ИИ</span>
+          <strong id="augmentationScore">0%</strong>
+        </article>
+        <article class="score-card">
+          <span class="meta-label">Человеческий зазор</span>
+          <strong id="humanEdgeScore">0%</strong>
+        </article>
       </div>
 
-      <div class="board-shell">
-        <canvas id="game" width="360" height="720" aria-label="Игровое поле"></canvas>
-        <div id="overlay" class="overlay">
-          <p class="overlay-eyebrow">Мягкий старт</p>
-          <h2>Невозможно проиграть</h2>
-          <p>
-            Нажми старт или любую кнопку управления. Дальше останется только
-            складывать формы и смотреть, как они становятся спокойным потоком.
-          </p>
-        </div>
+      <div class="result-block">
+        <p class="block-title">Что это значит</p>
+        <p id="resultMeaning"></p>
       </div>
 
-      <div class="mobile-controls" aria-label="Экранные кнопки управления">
-        <button data-action="left">←</button>
-        <button data-action="rotate">⟳</button>
-        <button data-action="right">→</button>
-        <button data-action="down">↓</button>
+      <div class="result-block">
+        <p class="block-title">Что качать уже сейчас</p>
+        <ul id="resultAdvice" class="advice-list"></ul>
       </div>
+
+      <div class="result-block sources-block">
+        <p class="block-title">На чем это основано</p>
+        <p>
+          Логика викторины вдохновлена материалами Anthropic о том, что ИИ чаще
+          сначала усиливает цифровую работу, а не полностью заменяет ее.
+        </p>
+        <p class="sources">
+          <a href="https://www.anthropic.com/economic-index/" target="_blank" rel="noreferrer">Anthropic Economic Index</a>
+          <a href="https://www.anthropic.com/news/the-anthropic-economic-index/" target="_blank" rel="noreferrer">Introducing the Anthropic Economic Index</a>
+        </p>
+      </div>
+
+      <button id="replayButton" class="primary-action" type="button">Пройти еще раз</button>
     </section>
   </main>
 
