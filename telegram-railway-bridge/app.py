@@ -52,6 +52,14 @@ def unauthorized_reply() -> str:
     return "This chat is not authorized for this bot."
 
 
+def public_error_message(exc: Exception) -> str:
+    text = str(exc)
+    lowered = text.lower()
+    if "invalid_api_key" in lowered or "incorrect api key" in lowered:
+        return "Bot is temporarily misconfigured on the server side. The OpenAI API key needs to be updated."
+    return "Sorry, something failed on the server side. Please try again in a moment."
+
+
 @APP.on_event("startup")
 def on_startup() -> None:
     STORE.init_db()
@@ -181,7 +189,7 @@ def process_update(update: Dict[str, Any]) -> None:
         try:
             TELEGRAM.send_message(
                 chat_id,
-                f"Sorry, something failed: {exc}",
+                public_error_message(exc),
                 reply_to_message_id=message_id,
             )
         except Exception:  # noqa: BLE001
