@@ -77,7 +77,7 @@ def healthz() -> Dict[str, str]:
 async def telegram_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    x_telegram_bot_api_secret_token: Optional[str] = Header(default=None),
 ) -> Dict[str, bool]:
     if CONFIG.webhook_secret_token:
         if x_telegram_bot_api_secret_token != CONFIG.webhook_secret_token:

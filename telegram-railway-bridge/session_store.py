@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 def _utc_now() -> str:
@@ -63,7 +63,7 @@ class SessionStore:
                 """
             )
 
-    def claim_update(self, update_id: int, chat_id: int | None) -> bool:
+    def claim_update(self, update_id: int, chat_id: Optional[int]) -> bool:
         now = _utc_now()
         with self._connect() as conn:
             try:
@@ -92,7 +92,7 @@ class SessionStore:
     def upsert_chat(
         self,
         chat_id: int,
-        telegram_user_id: int | None,
+        telegram_user_id: Optional[int],
         username: str,
         first_name: str,
         last_name: str,
@@ -120,7 +120,7 @@ class SessionStore:
         chat_id: int,
         role: str,
         text: str,
-        telegram_message_id: int | None = None,
+        telegram_message_id: Optional[int] = None,
     ) -> None:
         with self._connect() as conn:
             conn.execute(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 def _load_dotenv(dotenv_path: Path) -> None:
@@ -18,13 +18,13 @@ def _load_dotenv(dotenv_path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip("'").strip('"'))
 
 
-def _parse_bool(value: str | None, default: bool) -> bool:
+def _parse_bool(value: Optional[str], default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _parse_csv_ints(value: str | None) -> List[int]:
+def _parse_csv_ints(value: Optional[str]) -> List[int]:
     if not value:
         return []
     result: List[int] = []
@@ -58,7 +58,7 @@ class Config:
         return f"{base}{path}"
 
     @classmethod
-    def from_env(cls, env_path: Path | None = None) -> "Config":
+    def from_env(cls, env_path: Optional[Path] = None) -> "Config":
         _load_dotenv(env_path or Path(__file__).resolve().parent / ".env")
 
         telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
