@@ -58,12 +58,15 @@ def on_startup() -> None:
     me = TELEGRAM.get_me()
     LOGGER.info("Connected to bot @%s", me.get("username"))
     if CONFIG.auto_register_webhook and CONFIG.public_base_url:
-        TELEGRAM.set_webhook(
-            url=CONFIG.webhook_url,
-            secret_token=CONFIG.webhook_secret_token,
-            allowed_updates=["message"],
-        )
-        LOGGER.info("Webhook registered at %s", CONFIG.webhook_url)
+        try:
+            TELEGRAM.set_webhook(
+                url=CONFIG.webhook_url,
+                secret_token=CONFIG.webhook_secret_token,
+                allowed_updates=["message"],
+            )
+            LOGGER.info("Webhook registered at %s", CONFIG.webhook_url)
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Webhook registration failed at startup for %s", CONFIG.webhook_url)
     elif CONFIG.auto_register_webhook:
         LOGGER.info("PUBLIC_BASE_URL is empty; skipping webhook registration")
 
